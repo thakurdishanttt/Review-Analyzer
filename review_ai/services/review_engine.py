@@ -22,8 +22,7 @@ class ReviewEngine:
             star_rating=review_request.star_rating
         )
         
-        # Add metadata for tracking and dashboard
+        # Add product category for dashboard
         result['product_category'] = review_request.product_category
-        result['review_id'] = review_request.review_id
         
         return result

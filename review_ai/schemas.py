@@ -1,17 +1,14 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict
 from datetime import datetime
-from uuid import uuid4
 
 class ReviewRequest(BaseModel):
-    review_id: Optional[str] = Field(default_factory=lambda: f"R{uuid4().hex[:8]}")
     review_text: str
     product_category: str
     star_rating: int
     date_submitted: datetime
 
 class ReviewAnalysis(BaseModel):
-    review_id: str = Field(..., description="Unique identifier for the review")
     sentiment: str = Field(..., description="Positive, Neutral, or Negative")
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence score between 0 and 1")
     themes: List[str] = Field(..., description="List of themes found in the review")

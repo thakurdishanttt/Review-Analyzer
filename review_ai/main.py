@@ -2,100 +2,92 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from .schemas import ReviewRequest, ReviewAnalysis, DashboardMetrics
 from .services.review_engine import ReviewEngine
 from typing import List, Dict
-from datetime import datetime
+from collections import defaultdict
 import json
+from datetime import datetime
 
-app = FastAPI()
+app = FastAPI(title="Review Analysis API")
 review_engine = ReviewEngine()
 
-# In-memory store for reviews
+# Store reviews in memory (in production, use a database)
 reviews_store: List[ReviewAnalysis] = []
 
 @app.post("/analyze/upload-json")
-async def upload_reviews_json(file: UploadFile = File(...)):
+async def upload_reviews_json(file: UploadFile = File(...)) -> List[ReviewAnalysis]:
+    """Upload and process multiple reviews from a JSON file"""
     try:
         content = await file.read()
         reviews_data = json.loads(content)
+        
+        # Convert to list if single review
+        if not isinstance(reviews_data, list):
+            reviews_data = [reviews_data]
+        
+        if not reviews_data:
+            raise HTTPException(status_code=400, detail="No reviews found in file")
+        
+        results = []
+        for review_data in reviews_data:
+            try:
+                # Convert to ReviewRequest object
+                review_request = ReviewRequest(
+                    review_text=review_data["review_text"],
+                    product_category=review_data["product_category"],
+                    star_rating=review_data["star_rating"],
+                    date_submitted=datetime.strptime(review_data["date_submitted"], "%Y-%m-%d")
+                )
+                
+                # Process the review
+                result = await review_engine.process_review(review_request)
+                analysis = ReviewAnalysis(**result)
+                
+                # Store for dashboard
+                reviews_store.append(analysis)
+                
+                results.append(analysis)
+            except Exception as e:
+                # Log the error but continue processing other reviews
+                print(f"Error processing review: {str(e)}")
+                continue
+        
+        if not results:
+            raise HTTPException(status_code=500, detail="Failed to process any reviews")
+            
+        return results
+        
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
+        raise HTTPException(status_code=400, detail="Invalid JSON file")
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
-    
-    if not isinstance(reviews_data, list):
-        reviews_data = [reviews_data]
-    
-    if not reviews_data:
-        raise HTTPException(status_code=400, detail="No reviews found in file")
-    
-    results = []
-    for review_data in reviews_data:
-        try:
-            # Convert the review data to a ReviewRequest object
-            # If review_id is not provided, it will be auto-generated
-            review_request = ReviewRequest(
-                review_text=review_data["review_text"],
-                product_category=review_data["product_category"],
-                star_rating=review_data["star_rating"],
-                date_submitted=datetime.strptime(review_data["date_submitted"], "%Y-%m-%d")
-            )
-            
-            # Process the review
-            result = await review_engine.process_review(review_request)
-            analysis = ReviewAnalysis(**result)
-            
-            # Store for dashboard
-            reviews_store.append(analysis)
-            results.append(analysis)
-            
-        except Exception as e:
-            # Log the error but continue processing other reviews
-            print(f"Error processing review: {str(e)}")
-            continue
-    
-    if not results:
-        raise HTTPException(status_code=500, detail="Error processing all reviews")
-    
-    return results
+        raise HTTPException(status_code=500, detail=f"Error processing reviews: {str(e)}")
 
-@app.get("/dashboard")
-async def get_dashboard():
+@app.get("/dashboard", response_model=DashboardMetrics)
+async def get_dashboard_metrics():
+    """Get analytics dashboard data"""
     if not reviews_store:
-        return {
-            "sentiment_distribution": {},
-            "common_themes": {},
-            "urgent_reviews": [],
-            "metrics": {
-                "total_reviews": 0,
-                "average_confidence": 0,
-                "average_urgency": 0,
-                "urgent_review_ratio": 0
-            }
-        }
+        return DashboardMetrics()
     
     # Calculate sentiment distribution
-    sentiment_dist = {}
+    sentiment_dist = defaultdict(int)
     for review in reviews_store:
-        sentiment_dist[review.sentiment] = sentiment_dist.get(review.sentiment, 0) + 1
+        sentiment_dist[review.sentiment] += 1
     
-    # Find common themes
-    theme_counts: Dict[str, int] = {}
+    # Get common themes
+    themes_count = defaultdict(int)
     for review in reviews_store:
         for theme in review.themes:
-            theme_counts[theme] = theme_counts.get(theme, 0) + 1
+            themes_count[theme] += 1
     
     # Get urgent reviews (urgency score > 0.7)
-    urgent_reviews = [
-        {
-            "review_id": review.review_id,
-            "text": review.response,
-            "urgency_score": review.urgency_score,
-            "sentiment": review.sentiment
-        }
-        for review in reviews_store
-        if review.urgency_score > 0.7
-    ]
+    urgent_reviews = sorted(
+        [r for r in reviews_store if r.urgency_score > 0.7],
+        key=lambda x: x.urgency_score,
+        reverse=True
+    )[:5]  # Top 5 most urgent
     
-    # Calculate averages
+    # Calculate sentiment by category
+    category_sentiment = defaultdict(lambda: defaultdict(int))
     for review in reviews_store:
         if hasattr(review, 'product_category'):
             category_sentiment[review.product_category][review.sentiment] += 1

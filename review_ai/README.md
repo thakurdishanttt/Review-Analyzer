@@ -61,7 +61,6 @@ uvicorn review_ai.main:app --reload
 Upload a JSON file containing customer reviews. Each review should have:
 ```json
 {
-    "review_id": "R001",
     "review_text": "Customer review content",
     "product_category": "Electronics",
     "star_rating": 4,
@@ -72,7 +71,6 @@ Upload a JSON file containing customer reviews. Each review should have:
 Response format:
 ```json
 {
-    "review_id": "R001",
     "sentiment": "Positive",
     "confidence_score": 0.95,
     "themes": ["product quality", "ease of use"],
